@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jokers & Marbles (MVP)</title>
+</head>
+<body>
+  <h1>Jokers & Marbles MVP</h1>
+  <p>Enter Room ID, Name, Color, and Host code (F@rt for host).</p>
+  <!-- UI markup omitted for brevity -->
+  <script>
+    // If served from Render alongside server.js, leave blank.
+    // Or set to explicit Render URL if hosting elsewhere.
+    const SERVER_URL = "";
+  </script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    const socket = SERVER_URL ? io(SERVER_URL) : io();
+    console.log("Socket connected:", socket);
+  </script>
+</body>
+</html>
