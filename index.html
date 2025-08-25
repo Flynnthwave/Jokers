@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jokers & Marbles (MVP)</title>
+  <style>
+    :root{ --bg:#0f1220; --panel:#171a2b; --ink:#e7e8ef; --muted:#9aa0b4; --accent:#6ee7ff; --good:#4ade80; --warn:#fbbf24; --bad:#ef4444; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;background:radial-gradient(1200px 800px at 20% -10%,#1a1e36,transparent),
+      radial-gradient(1000px 700px at 120% 10%,#0b0d16,transparent),var(--bg);color:var(--ink)}
+    .wrap{max-width:1200px;margin:0 auto;padding:16px}
+    h1{font-size:20px;margin:12px 0 2px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.25)}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    input,select,button{background:#0e1120;color:var(--ink);border:1px solid #2a2e45;border-radius:10px;padding:10px 12px;font-size:14px}
+    input::placeholder{color:#667089}
+    button{cursor:pointer}
+    button.primary{background:linear-gradient(90deg,#2563eb,#06b6d4);border:none}
+    button.danger{background:linear-gradient(90deg,#ef4444,#f59e0b);border:none}
+    .muted{color:var(--muted)}
+    .pill{padding:4px 8px;border-radius:999px;border:1px solid #2b3150;background:#121428}
+    .hidden{display:none !important}
+
+    .board-wrap{position:relative;aspect-ratio:1/1;width:100%;max-width:720px;margin:8px auto 0}
+    .track{position:absolute;inset:0;display:grid;grid-template-columns:repeat(14,1fr);grid-template-rows:repeat(14,1fr);gap:4px;padding:8px}
+    .cell{border:1px solid rgba(255,255,255,0.06);border-radius:6px;opacity:.5}
+    .marble{position:absolute;width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,0.7);box-shadow:0 4px 10px rgba(0,0,0,0.35);
+      transition:transform 420ms cubic-bezier(.2,.9,.2,1)}
+    .marble .num{position:absolute;inset:0;display:grid;place-items:center;font-size:12px;color:#0a0b12;font-weight:700}
+    .turn-ring{position:absolute;inset:-6px;border:2px dashed var(--accent);border-radius:50%;animation:pulse 1.2s infinite ease-in-out}
+    @keyframes pulse{0%{opacity:.2}50%{opacity:.9}100%{opacity:.2}}
+    .hand{display:flex;gap:8px;flex-wrap:wrap}
+    .cardbtn{min-width:56px;padding:8px 10px;border-radius:10px;border:1px solid #2a2e45;background:#12152a}
+    .cardbtn:hover{outline:2px solid #2dd4bf}
+    .log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background:#0a0c18;border:1px solid #2a2e45;border-radius:10px;padding:10px;max-height:220px;overflow:auto}
+    .flex{display:flex;gap:10px;align-items:center}
+    .space{flex:1}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🃏 Jokers & Marbles <span class="muted">— MVP (4-player teams)</span></h1>
+
+    <div id="lobby" class="card">
+      <div class="row">
+        <input id="room" placeholder="Room ID (e.g., FAMILY123)" />
+        <input id="name" placeholder="Your name" />
+        <select id="color">
+          <option value="#ef4444">Red</option>
+          <option value="#22c55e">Green</option>
+          <option value="#3b82f6">Blue</option>
+          <option value="#eab308">Yellow</option>
+          <option value="#a855f7">Purple</option>
+          <option value="#f97316">Orange</option>
+        </select>
+        <input id="hostcode" placeholder='Host code (use F@rt if you are hosting)' />
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="serverUrl" placeholder="Server URL (optional, e.g., https://your-app.onrender.com)" style="flex:1" />
+        <button id="joinBtn" class="primary">Join Room</button>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        Tip: If this page is NOT hosted by the same app as the server (e.g., you're loading it from Squarespace),
+        paste your Render URL above so the socket knows where to connect.
+      </p>
+      <div id="roster" class="row" style="margin-top:10px"></div>
+    </div>
+
+    <div id="hud" class="card hidden">
+      <div class="flex">
+        <div id="seatInfo" class="pill">Seat: -</div>
+        <div id="teamInfo" class="pill">Team: -</div>
+        <div id="turnInfo" class="pill">Turn: -</div>
+        <div class="space"></div>
+        <button id="startBtn" class="primary hidden">Start Game</button>
+        <button id="resetBtn" class="danger hidden">Reset</button>
+      </div>
+    </div>
+
+    <div id="boardCard" class="card hidden">
+      <div class="board-wrap">
+        <div id="track" class="track"></div>
+        <div id="marblesLayer"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="card" style="flex:1">
+          <div class="flex"><strong>Your Hand</strong><span class="space"></span><span id="handCount" class="muted"></span></div>
+          <div id="hand" class="hand"></div>
+        </div>
+        <div class="card" style="flex:1">
+          <strong>Log</strong>
+          <div id="log" class="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    const $ = (q)=>document.querySelector(q);
+    const $$ = (q)=>document.querySelectorAll(q);
+    const state = { me:null, room:null, players:[], isHost:false, myHand:[], game:null, socket:null };
+
+    function log(msg){ const el=document.createElement('div'); el.textContent=msg; $('#log').prepend(el); }
+
+    // Join flow: connect socket on demand (so we can point to a custom server URL)
+    $('#joinBtn').onclick = async () => {
+      const room = $('#room').value.trim();
+      const name = $('#name').value.trim() || `Guest-${Math.floor(Math.random()*999)}`;
+      const color = $('#color').value;
+      const hostcode = $('#hostcode').value.trim();
+      const serverUrl = ($('#serverUrl').value.trim() || window.location.origin);
+
+      if(!room){ alert('Enter a Room ID.'); return; }
+
+      try {
+        // Basic health probe so users see a fast failure if URL is wrong
+        const ok = await fetch(serverUrl.replace(/\/$/,'') + '/health', { mode:'cors' }).then(r=>r.ok).catch(()=>false);
+        if(!ok) log('Warning: /health check failed at ' + serverUrl + ' — socket may still connect if CORS allows.');
+      } catch(e){ log('Health check error: ' + (e?.message||e)); }
+
+      // Create socket now, using serverUrl
+      state.socket = io(serverUrl, { transports:['websocket','polling'] });
+      state.socket.on('connect_error', (e)=> log('Socket error: ' + e.message));
+      state.socket.on('connect', ()=> {
+        state.socket.emit('join', {room, name, color, hostcode});
+      });
+
+      // Wire up listeners once
+      state.socket.on('joined', (payload)=>{
+        state.room = payload.room; state.me = payload.me; state.isHost = payload.isHost;
+        $('#lobby').classList.remove('hidden');
+        $('#hud').classList.remove('hidden');
+        $('#boardCard').classList.remove('hidden');
+        if(state.isHost){ $('#startBtn').classList.remove('hidden'); $('#resetBtn').classList.remove('hidden'); }
+        $('#seatInfo').textContent = `Seat: ${payload.me.seat}`;
+        $('#teamInfo').textContent = `Team: ${payload.me.team}`;
+        renderRoster(payload.players);
+        buildTrack();
+      });
+      state.socket.on('roster', renderRoster);
+      state.socket.on('game:state', (g)=>{ state.game = g; renderGame(); });
+      state.socket.on('game:hand', (hand)=>{ state.myHand = hand; renderHand(); });
+      state.socket.on('game:log', (msg)=> log(msg));
+
+      // Host controls
+      $('#startBtn').onclick = ()=> state.socket.emit('host:start', {room:state.room});
+      $('#resetBtn').onclick = ()=> { if(confirm('Reset the room?')) state.socket.emit('host:reset',{room:state.room}); };
+    };
+
+    function renderRoster(players){
+      state.players = players; const r = $('#roster'); r.innerHTML='';
+      players.forEach(p=>{
+        const chip = document.createElement('div');
+        chip.className='pill';
+        chip.style.borderColor=p.color; chip.style.boxShadow=`0 0 0 2px ${p.color} inset`;
+        chip.textContent = `${p.name} — seat ${p.seat} — team ${p.team}${p.host?' (host)':''}`;
+        r.appendChild(chip);
+      });
+    }
+
+    function renderGame(){
+      if(!state.game) return;
+      $('#turnInfo').textContent = `Turn: seat ${state.game.turn}`;
+      placeAllMarbles();
+    }
+    function renderHand(){
+      const H = $('#hand'); H.innerHTML='';
+      $('#handCount').textContent = `${state.myHand.length} cards`;
+      state.myHand.forEach((card, idx)=>{
+        const b = document.createElement('button'); b.className='cardbtn';
+        b.textContent = card;
+        b.onclick = ()=> selectCard(idx, card);
+        H.appendChild(b);
+      });
+    }
+
+    let pendingMove = null;
+    function selectCard(index, rank){
+      if(!state.game || state.game.turn !== state.me.seat){ alert('Not your turn.'); return; }
+      if(rank === 'JOKER'){
+        const choice = prompt('Joker: enter 1-13 or type GETOUT');
+        if(!choice) return;
+        pendingMove = {index, rank, jokerChoice: choice.toUpperCase()};
+      } else if(rank === '7'){
+        pendingMove = {index, rank, split:null}; // MVP: single 7 forward
+      } else {
+        pendingMove = {index, rank};
+      }
+      highlightMovableMarbles(rank, pendingMove?.jokerChoice);
+    }
+
+    function highlightMovableMarbles(rank, jokerChoice){
+      const canPlayPartner = state.game.players[state.me.seat].allHome;
+      const seats = [state.me.seat, (canPlayPartner? (state.me.seat+2)%4 : null)].filter(x=>x!==null);
+      $$('#marblesLayer .marble').forEach(m=>{
+        const seat = +m.dataset.seat;
+        if(seats.includes(seat)){
+          if(!m.querySelector('.turn-ring')){ const r=document.createElement('div'); r.className='turn-ring'; m.appendChild(r);}  
+          m.onclick = ()=>{
+            const marbleId = +m.dataset.id;
+            state.socket.emit('play', {room:state.room, seat:state.me.seat, cardIndex: pendingMove.index, rank, marbleId, jokerChoice});
+            clearRings();
+          };
+        }
+      });
+    }
+    function clearRings(){ $$('.turn-ring').forEach(x=>x.remove()); $$('#marblesLayer .marble').forEach(m=> m.onclick=null); }
+
+    // Board geometry
+    const BOARD = {TRACK_LEN:56, PER_SEAT:14, CORNERS:[0,14,28,42]};
+
+    function buildTrack(){
+      const t = $('#track'); t.innerHTML='';
+      for(let r=0;r<14;r++) for(let c=0;c<14;c++){
+        const onRing = (r===1||r===12||c===1||c===12) && !(r<=2&&c<=2) && !(r<=2&&c>=11) && !(r>=11&&c<=2) && !(r>=11&&c>=11);
+        const cell = document.createElement('div'); cell.className='cell'; if(!onRing) cell.style.opacity=.08;
+        t.appendChild(cell);
+      }
+      placeAllMarbles();
+    }
+    function seatColor(seat){ const p = state.players.find(p=>p.seat===seat); return p? p.color : '#fff'; }
+    function placeAllMarbles(){
+      const layer = $('#marblesLayer'); layer.innerHTML='';
+      if(!state.game) return;
+      state.game.players.forEach((P, seat)=>{
+        P.marbles.forEach((m, i)=>{
+          const el = document.createElement('div'); el.className='marble'; el.dataset.seat=seat; el.dataset.id=i;
+          el.style.background = seatColor(seat);
+          const txt = document.createElement('div'); txt.className='num'; txt.textContent = i+1; el.appendChild(txt);
+          const {x,y} = getMarblePixelPos(seat, m);
+          el.style.transform = `translate(${x}px, ${y}px)`;
+          layer.appendChild(el);
+        });
+      });
+    }
+    function getMarblePixelPos(seat, m){
+      const wrap = document.querySelector('.board-wrap').getBoundingClientRect();
+      const pad = 24; const W = wrap.width - pad*2; const H = wrap.height - pad*2;
+      function ringPoint(k){
+        const n=BOARD.TRACK_LEN; const t=(k/n);
+        const side = Math.floor(t*4); const local = t*4 - side; const margin=0.12;
+        let x=0,y=0;
+        if(side===0){ x = margin + (1-2*margin)*local; y = margin; }
+        else if(side===1){ x = 1-margin; y = margin + (1-2*margin)*local; }
+        else if(side===2){ x = 1-margin - (1-2*margin)*local; y = 1-margin; }
+        else { x = margin; y = 1-margin - (1-2*margin)*local; }
+        return {x: pad + x*W, y: pad + y*H};
+      }
+      const seatOffset = seat*BOARD.PER_SEAT;
+      if(m.where==='START'){
+        const angle = seat*Math.PI/2; const cx = wrap.width/2 + Math.cos(angle)* (wrap.width/2-80);
+        const cy = wrap.height/2 + Math.sin(angle)* (wrap.height/2-80);
+        return {x: cx + (m.index%3)*16 - 28, y: cy + Math.floor(m.index/3)*16 - 28};
+      }
+      if(m.where==='TRACK'){
+        const pt = ringPoint((seatOffset + m.index)%BOARD.TRACK_LEN);
+        return {x: pt.x-14, y: pt.y-14};
+      }
+      if(m.where==='HOME'){
+        const homeBase = ringPoint((seatOffset + BOARD.PER_SEAT - 1)%BOARD.TRACK_LEN);
+        const inwardX = (wrap.width/2 - homeBase.x)*0.6; const inwardY = (wrap.height/2 - homeBase.y)*0.6;
+        return {x: homeBase.x + inwardX - 10 + (m.index%3)*12, y: homeBase.y + inwardY - 10 + Math.floor(m.index/3)*12};
+      }
+      return {x:0,y:0};
+    }
+  </script>
+</body>
+</html>
