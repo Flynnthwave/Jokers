@@ -4,12 +4,214 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Jokers & Marbles — Fresh Start</title>
-<!-- CSS and styles omitted here for brevity; use full HTML from previous message -->
+<style>
+  :root{
+    --ink:#f5f7ff; --muted:#a9b1c6; --line:#2c2f3b;
+    --board-bg:#5c3f25;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial; color:var(--ink); background:#0e1220;}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px}
+  h1{margin:6px 0 12px;font-size:22px}
+  .card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  input,select,button,label{font-size:16px}
+  input,select{background:#0e1325;color:var(--ink);border:1px solid #2b3150;border-radius:12px;padding:10px 12px}
+  button{cursor:pointer;border-radius:12px;padding:10px 14px;border:1px solid #2b3150;background:#0e1325}
+  button.primary{background:linear-gradient(90deg,#2563eb,#06b6d4);border:none;color:#fff;font-weight:700}
+  .muted{color:var(--muted)} .hidden{display:none!important}
+  .pill{padding:5px 10px;border:1px solid #2b3150;border-radius:999px;background:#0e1325}
+
+  /* Board shell */
+  .boardCard{margin-top:12px}
+  .board-wrap{
+    position:relative; width:100%; max-width:860px; aspect-ratio:1/1; margin:0 auto; border-radius:18px; overflow:hidden;
+    box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 0 0 6px #3a2a18;
+    background:
+      url('https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=1600&q=60') center/cover,
+      var(--board-bg);
+  }
+  .rim{position:absolute;inset:10px;border-radius:12px;box-shadow:inset 0 0 0 10px #4b341d}
+  .holes{position:absolute;inset:36px}
+  .hole{
+    position:absolute;width:22px;height:22px;border-radius:50%;
+    background: radial-gradient(45% 45% at 35% 35%, #5a4028 0%, #3e2a18 50%, #23160d 100%);
+    box-shadow: inset 0 3px 6px rgba(0,0,0,.6), 0 2px 1px rgba(255,255,255,.05);
+  }
+
+  /* Marbles (Start rows + Home crosses) */
+  .pip{
+    position:absolute;width:26px;height:26px;border-radius:50%;
+    box-shadow:inset 0 3px 0 rgba(255,255,255,.5), 0 4px 10px rgba(0,0,0,.4);
+    border:2px solid #ffffffa0;
+  }
+  .c-red{ background:#e63939 }
+  .c-blue{ background:#3b82f6 }
+  .c-yellow{ background:#facc15 }
+  .c-green{ background:#22c55e }
+
+  .board-rot{ position:relative; width:100%; height:100%; transform:rotate(0deg); transition:transform .3s ease }
+
+  #roster{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{border-radius:999px;padding:4px 8px;border:1px solid #2b3150;background:#0e1325}
+</style>
 </head>
 <body>
   <div class="wrap">
     <h1>🃏 Jokers & Marbles — Fresh Start</h1>
-    <p>Replace this file with the full index.html provided earlier.</p>
+
+    <!-- Lobby -->
+    <div id="lobby" class="card">
+      <div class="row">
+        <input id="room" placeholder="Room ID (e.g., FAMILY123)" />
+        <input id="name" placeholder="Your name" />
+        <select id="color">
+          <option value="#e63939">Red</option>
+          <option value="#3b82f6">Blue</option>
+          <option value="#facc15">Yellow</option>
+          <option value="#22c55e">Green</option>
+        </select>
+        <label class="row" style="gap:6px;"><input type="checkbox" id="isHost"/> I’m the host</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="joinBtn" class="primary">Join Room</button>
+      </div>
+      <p class="muted" style="margin-top:6px">Invite fam: everyone uses the same Room ID. First four in get seats 0–3.</p>
+      <div id="roster" style="margin-top:8px"></div>
+      <div id="toast" class="muted" style="margin-top:6px"></div>
+    </div>
+
+    <!-- Board -->
+    <div id="boardCard" class="card boardCard hidden">
+      <div class="row"><div id="seatInfo" class="pill">Seat: —</div><div class="pill">Angle: <span id="angle">0°</span></div></div>
+      <div class="board-wrap" aria-label="Board">
+        <div id="boardRot" class="board-rot">
+          <div class="rim"></div>
+          <div id="holes" class="holes"></div>
+          <!-- dynamic pips drawn by JS from roster -->
+          <div id="pips"></div>
+        </div>
+      </div>
+      <p class="muted" style="text-align:center;margin-top:8px">Shared board view. More visuals (cards at bottom) next.</p>
+    </div>
   </div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+<script>
+  // --------- Minimal client state ----------
+  const $ = sel => document.querySelector(sel);
+  const state = { socket:null, me:null, room:null, players:[] };
+
+  // --------- Join flow ----------
+  $('#joinBtn').onclick = () => {
+    const room = $('#room').value.trim();
+    const name = $('#name').value.trim() || 'Guest';
+    const color = $('#color').value;
+    const isHost = $('#isHost').checked;
+    if(!room){ toast('Enter a Room ID'); return; }
+
+    if(!state.socket){
+      state.socket = io(); // same origin; deploy index & server together on Render
+      state.socket.on('toast', msg => toast(msg));
+      state.socket.on('joined', payload => {
+        state.room = payload.room; state.me = payload.me; state.players = payload.players;
+        // Swap to board view immediately on join
+        $('#lobby').classList.add('hidden');
+        $('#boardCard').classList.remove('hidden');
+        setSeat(state.me.seat);
+        renderRoster(state.players);
+        buildHoles();
+        drawPipsFromRoster();
+      });
+      state.socket.on('roster', players => {
+        state.players = players;
+        renderRoster(players);
+        drawPipsFromRoster();
+      });
+    }
+
+    state.socket.emit('join', { room, name, color, isHost });
+  };
+
+  function toast(msg){ $('#toast').textContent = msg; }
+
+  // --------- Roster ----------
+  function renderRoster(players){
+    const R = $('#roster'); R.innerHTML='';
+    players.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className='chip';
+      chip.style.boxShadow = `0 0 0 2px ${p.color} inset`;
+      chip.textContent = `${p.name} — seat ${p.seat}${p.isHost?' (host)':''}`;
+      R.appendChild(chip);
+    });
+  }
+
+  // --------- Board: 56 edge holes ----------
+  function buildHoles(){
+    const holes = $('#holes'); if(holes.dataset.built==='1') return;
+    holes.dataset.built='1'; // build once
+    const N = 56;
+    for(let i=0;i<N;i++){
+      const d = document.createElement('div'); d.className='hole';
+      const side = Math.floor(i/14); const idx = i%14;
+      if(side===0){ d.style.left=(idx*(100/13))+'%'; d.style.top='0%'; }
+      else if(side===1){ d.style.left='100%'; d.style.top=(idx*(100/13))+'%'; }
+      else if(side===2){ d.style.left=(100-idx*(100/13))+'%'; d.style.top='100%'; }
+      else { d.style.left='0%'; d.style.top=(100-idx*(100/13))+'%'; }
+      d.style.transform='translate(-50%,-50%)';
+      holes.appendChild(d);
+    }
+  }
+
+  // --------- Start rows + Home crosses from roster ----------
+  // Seat mapping: 0=top, 1=right, 2=bottom, 3=left (board rotates so your seat is at top for you)
+  const seatToRotation = { 0:180, 1:270, 2:0, 3:90 };
+  function setSeat(seat){
+    $('#seatInfo').textContent = 'Seat: ' + seat;
+    const deg = seatToRotation[seat] ?? 0;
+    $('#boardRot').style.transform = `rotate(${deg}deg)`;
+    $('#angle').textContent = deg + '°';
+  }
+
+  function drawPipsFromRoster(){
+    const pips = $('#pips'); pips.innerHTML='';
+    // place 5 start + 5 home in each seat's quadrant, colored to that player's chosen color
+    state.players.forEach(p => drawSeatPips(p.seat, p.color));
+  }
+
+  function drawSeatPips(seat, color){
+    // Start rows & Home crosses are positioned approximately in each quadrant
+    const add = (style) => {
+      const d = document.createElement('div');
+      d.className='pip'; d.style.background=color; d.style.borderColor='#ffffffa0';
+      Object.assign(d.style, style); $('#pips').appendChild(d);
+    };
+    if(seat===2){ // bottom (was Blue in ref)
+      [80,118,156,194,232].forEach(x => add({ left:x+'px', bottom:'52px' })); // start row
+      add({ left:'120px', bottom:'220px' }); add({ left:'120px', bottom:'182px' });
+      add({ left:'120px', bottom:'144px' }); add({ left:'82px', bottom:'182px' });
+      add({ left:'158px', bottom:'182px' }); // home cross
+    }
+    if(seat===1){ // right (was Yellow)
+      [260,298,336,374,412].forEach(y => add({ right:'52px', top:y+'px' }));
+      add({ right:'120px', top:'280px' }); add({ right:'120px', top:'318px' });
+      add({ right:'120px', top:'356px' }); add({ right:'158px', top:'318px' });
+      add({ right:'82px', top:'318px' });
+    }
+    if(seat===0){ // top (was Green)
+      [80,120,160,200,240].forEach(y => add({ left:'50%', transform:'translateX(-50%)', top:y+'px' }));
+      add({ left:'280px', top:'120px' }); add({ left:'280px', top:'158px' });
+      add({ left:'280px', top:'196px' }); add({ left:'242px', top:'158px' });
+      add({ left:'318px', top:'158px' });
+    }
+    if(seat===3){ // left (was Red)
+      [80,120,160,200,240].forEach(y => add({ left:'50%', transform:'translateX(-50%)', bottom:(y+40)+'px' }));
+      add({ right:'280px', bottom:'120px' }); add({ right:'280px', bottom:'158px' });
+      add({ right:'280px', bottom:'196px' }); add({ right:'318px', bottom:'158px' });
+      add({ right:'242px', bottom:'158px' });
+    }
+  }
+</script>
 </body>
 </html>
